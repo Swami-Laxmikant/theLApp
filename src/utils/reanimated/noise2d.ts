@@ -3,25 +3,23 @@
 import {useEffect, useState} from 'react';
 import {cancelAnimation, makeMutable, runOnUI} from 'react-native-reanimated';
 
-const F2 = makeMutable(0.5 * (Math.sqrt(3.0) - 1.0));
-const G2 = makeMutable((3.0 - Math.sqrt(3.0)) / 6.0);
+const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
 
 const fastFloor = (x: number) => {
   'worklet';
   return Math.floor(x) | 0;
 };
 
-const grad2 = makeMutable(
-  new Float64Array([
-    1, 1, -1, 1, 1, -1,
+const grad2 = new Float64Array([
+  1, 1, -1, 1, 1, -1,
 
-    -1, -1, 1, 0, -1, 0,
+  -1, -1, 1, 0, -1, 0,
 
-    1, 0, -1, 0, 0, 1,
+  1, 0, -1, 0, 0, 1,
 
-    0, -1, 0, 1, 0, -1,
-  ]),
-);
+  0, -1, 0, 1, 0, -1,
+]);
 
 type RandomFn = () => number;
 
@@ -48,9 +46,9 @@ export function createNoise2D(random = Math.random) {
 
   const perm = buildPermutationTable(random);
 
-  const permGrad2x = new Float64Array(perm).map(v => grad2.value[(v % 12) * 2]);
+  const permGrad2x = new Float64Array(perm).map(v => grad2[(v % 12) * 2]);
   const permGrad2y = new Float64Array(perm).map(
-    v => grad2.value[(v % 12) * 2 + 1],
+    v => grad2[(v % 12) * 2 + 1],
   );
 
   return {
@@ -64,10 +62,10 @@ export function createNoise2D(random = Math.random) {
       let n1 = 0;
       let n2 = 0;
 
-      const s = (x + y) * F2.value;
+      const s = (x + y) * F2;
       const i = fastFloor(x + s);
       const j = fastFloor(y + s);
-      const t = (i + j) * G2.value;
+      const t = (i + j) * G2;
       const X0 = i - t;
       const Y0 = j - t;
       const x0 = x - X0;
@@ -82,10 +80,10 @@ export function createNoise2D(random = Math.random) {
         j1 = 1;
       }
 
-      const x1 = x0 - i1 + G2.value;
-      const y1 = y0 - j1 + G2.value;
-      const x2 = x0 - 1.0 + 2.0 * G2.value;
-      const y2 = y0 - 1.0 + 2.0 * G2.value;
+      const x1 = x0 - i1 + G2;
+      const y1 = y0 - j1 + G2;
+      const x2 = x0 - 1.0 + 2.0 * G2;
+      const y2 = y0 - 1.0 + 2.0 * G2;
 
       const ii = i & 255;
       const jj = j & 255;
@@ -125,9 +123,10 @@ export function createNoise2D(random = Math.random) {
 
 export type NoiseFunction2D = (x: number, y: number) => number;
 
+// might return 0 for first 1-2 frames
 export const useNoise2d = () => {
   const [n] = useState(() => {
-    const _n = makeMutable<NoiseFunction2D>(0 as any); // added only for type safety only
+    const _n = makeMutable<NoiseFunction2D>((_x: number, _y: number) => 0); // dummy function for initial value
     // instantiating on js thread wont work
     runOnUI(() => {
       const n2d = createNoise2D();
