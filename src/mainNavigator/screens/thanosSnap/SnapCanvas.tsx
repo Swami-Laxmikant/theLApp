@@ -7,6 +7,7 @@ import {
   ColorType,
   Group,
   Image,
+  rect,
   Skia,
   SkImage,
   useImage,
@@ -58,53 +59,66 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
     if (!image || isMaskedImageReady) {
       return [];
     }
+    runOnRuntime(
+      IMAGE_PROCESSOR_THREAD,
+      (_image: SkImage, upateImages: any) => {
+        'worklet';
+        let t = performance.now();
+        const offscreenSurface = Skia.Surface.MakeOffscreen(IMAGE_WIDTH, IMAGE_HEIGHT);
+        if (!offscreenSurface) return;
+        const offscreenCanvas = offscreenSurface.getCanvas();
+        offscreenCanvas.drawImageRect(
+          _image,
+          rect(0, 0, _image.width(), _image.height()),
+          rect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT),
+          Skia.Paint(),
+          true,
+        );
+        const image = offscreenSurface.makeImageSnapshot();
 
-    runOnRuntime(IMAGE_PROCESSOR_THREAD, (image: SkImage, upateImages: any) => {
-      'worklet';
-      const pixels = image.readPixels();
+        const pixels = image.readPixels();
 
-      if (!pixels?.length) {
-        return [];
-      }
-      const masks = Array(TOTAL_CANVASES)
-        .fill(0)
-        .map(() => new Uint8Array(pixels.length));
-      masks.forEach(m => m.fill(0));
-      const totalPoints = pixels.length / 4;
-      const width = image.width();
-      const height = image.height();
+        if (!pixels?.length) {
+          return;
+        }
+        const masks = Array(TOTAL_CANVASES)
+          .fill(0)
+          .map(() => new Uint8Array(pixels.length));
+        masks.forEach(m => m.fill(0));
+        const totalPoints = pixels.length / 4;
 
-      for (let i = 0; i < totalPoints; i++) {
-        let j = Math.floor((i / totalPoints) * TOTAL_CANVASES);
-        let canvaIndex = weightedRandomDistrib(j);
-        let x = i % width;
-        let y = Math.floor(i / width);
-        const index = (y * width + x) * 4;
+        for (let i = 0; i < totalPoints; i++) {
+          const j = Math.floor((i / totalPoints) * TOTAL_CANVASES);
+          const canvaIndex = weightedRandomDistrib(j);
+          const x = i % IMAGE_WIDTH;
+          const y = Math.floor(i / IMAGE_WIDTH);
+          const index = (y * IMAGE_WIDTH + x) * 4;
 
-        masks[canvaIndex][index] = pixels[index];
-        masks[canvaIndex][index + 1] = pixels[index + 1];
-        masks[canvaIndex][index + 2] = pixels[index + 2];
-        masks[canvaIndex][index + 3] = pixels[index + 3];
-      }
+          masks[canvaIndex][index] = pixels[index];
+          masks[canvaIndex][index + 1] = pixels[index + 1];
+          masks[canvaIndex][index + 2] = pixels[index + 2];
+          masks[canvaIndex][index + 3] = pixels[index + 3];
+        }
 
-      const images = masks.map(m =>
-        Skia.Image.MakeImage(
-          {
-            width,
-            height,
-            alphaType: AlphaType.Opaque,
-            colorType: ColorType.RGBA_8888,
-          },
-          Skia.Data.fromBytes(m),
-          width * 4,
-        ),
-      );
-
-      runOnJS(upateImages)(images);
-    })(image, upateImages);
+        const images = masks.map(m =>
+          Skia.Image.MakeImage(
+            {
+              width: IMAGE_WIDTH,
+              height: IMAGE_HEIGHT,
+              alphaType: AlphaType.Opaque,
+              colorType: ColorType.RGBA_8888,
+            },
+            Skia.Data.fromBytes(m),
+            IMAGE_WIDTH * 4,
+          ),
+        );
+        console.log(`Time taken: ${performance.now() - t} milliseconds`);
+        runOnJS(upateImages)(images);
+      },
+    )(image, upateImages);
   }, [image]);
 
-  let blur = useSharedValue(0);
+  const blur = useSharedValue(0);
   const opacity = useSharedValue(1);
   useEffect(() => {
     if (isStarted) {
@@ -160,14 +174,13 @@ function MaskedImage({
   myImg: SkImage | null;
   isStarted: boolean;
 }) {
-  let [isFaded, setIsFaded] = useState(false);
-  let opacity = useSharedValue(1);
-  let translation = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  const translation = useSharedValue(0);
 
   const angleDeviation =
     ((Math.PI / 36 - Math.PI / 6) / 36) * index + Math.PI / 6;
   const angle = useSharedValue(0);
-  const finalAngle = Math.random() * angleDeviation / 2;
+  const finalAngle = (Math.random() * angleDeviation) / 2;
 
   useEffect(() => {
     if (!isStarted) {
@@ -179,13 +192,13 @@ function MaskedImage({
       easing: Easing.linear,
     };
     setTimeout(() => {
-      opacity.value = withTiming(0, config, () => runOnJS(setIsFaded)(true));
+      opacity.value = withTiming(0, config);
       translation.value = withTiming(MAX_TRANSLATION, config);
       angle.value = withTiming(finalAngle, config);
     }, delay);
   }, [isStarted]);
 
-  let transform = useDerivedValue(() => {
+  const transform = useDerivedValue(() => {
     return [
       {translateX: translation.value},
       {translateY: -translation.value},
@@ -193,21 +206,18 @@ function MaskedImage({
     ];
   });
 
-  if (isFaded || !myImg) {
-    return null;
-  }
-
   return (
     <Image
-        origin={{x: IMAGE_WIDTH / 2, y: IMAGE_HEIGHT}} transform={transform}
-        opacity={opacity}
-        x={0}
-        y={0}
-        width={IMAGE_WIDTH}
-        height={IMAGE_HEIGHT}
-        image={myImg}
-        fit="cover"
-      />
+      origin={{x: IMAGE_WIDTH / 2, y: IMAGE_HEIGHT}}
+      transform={transform}
+      opacity={opacity}
+      x={0}
+      y={0}
+      width={IMAGE_WIDTH}
+      height={IMAGE_HEIGHT}
+      image={myImg}
+      fit="cover"
+    />
   );
 }
 
