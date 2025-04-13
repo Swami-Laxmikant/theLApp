@@ -1,0 +1,255 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-shadow */
+import {
+  AlphaType,
+  Blur,
+  Canvas,
+  ColorType,
+  Group,
+  Image,
+  Skia,
+  SkImage,
+  useImage,
+} from '@shopify/react-native-skia';
+import {useEffect, useMemo, useState} from 'react';
+import {
+  ActivityIndicator,
+  Dimensions,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  createWorkletRuntime,
+  Easing,
+  runOnJS,
+  runOnRuntime,
+  useDerivedValue,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import {images} from '../../../assets';
+import {array, useMutableValue} from '../../../utils';
+import {allCenter, flex1, textRegAtk} from '../../../constants';
+
+const TOTAL_CANVASES = 35;
+const MAX_TRANSLATION = 55;
+const BASE_DURATION = 700;
+const VAR_DURATION = 100;
+const SCREEN_WIDTH = Math.floor(Dimensions.get('window').width);
+const CANVAS_WIDTH = SCREEN_WIDTH - 24;
+const IMAGE_WIDTH = 200;
+const IMAGE_ASPECT_RATIO = 736 / 920;
+const IMAGE_HEIGHT = Math.floor(IMAGE_WIDTH / IMAGE_ASPECT_RATIO);
+
+const IMAGE_PROCESSOR_THREAD = createWorkletRuntime('imageProcessor');
+
+export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
+  const image = useImage(images.landscape);
+  const [isMaskedImageReady, setIsMaskedImageReady] = useState(false);
+  const mks = useMutableValue<(SkImage | null)[]>(() =>
+    array(TOTAL_CANVASES, () => null),
+  );
+
+  const upateImages = (images: (SkImage | null)[]) => {
+    mks.value = images;
+    setIsMaskedImageReady(true);
+  };
+
+  useMemo(() => {
+    if (!image || isMaskedImageReady) {
+      return [];
+    }
+
+    runOnRuntime(IMAGE_PROCESSOR_THREAD, (image: SkImage, upateImages: any) => {
+      'worklet';
+      const pixels = image.readPixels();
+
+      if (!pixels?.length) {
+        return [];
+      }
+
+      const masks = Array(TOTAL_CANVASES)
+        .fill(0)
+        .map(() => new Uint8Array(pixels.length));
+      masks.forEach(m => m.fill(0));
+      const totalPoints = pixels.length / 4;
+      const width = image.width();
+      const height = image.height();
+
+      for (let i = 0; i < totalPoints; i++) {
+        let j = Math.floor((i / totalPoints) * TOTAL_CANVASES);
+        let canvaIndex = weightedRandomDistrib(j);
+        let x = i % width;
+        let y = Math.floor(i / width);
+        const index = (y * width + x) * 4;
+        const r = pixels[index];
+        const g = pixels[index + 1];
+        const b = pixels[index + 2];
+        const a = pixels[index + 3];
+
+        masks[canvaIndex][index] = r;
+        masks[canvaIndex][index + 1] = g;
+        masks[canvaIndex][index + 2] = b;
+        masks[canvaIndex][index + 3] = a;
+      }
+
+      const images = masks.map(m =>
+        Skia.Image.MakeImage(
+          {
+            width,
+            height,
+            alphaType: AlphaType.Opaque,
+            colorType: ColorType.RGBA_8888,
+          },
+          Skia.Data.fromBytes(m),
+          width * 4,
+        ),
+      );
+
+      runOnJS(upateImages)(images);
+    })(image, upateImages);
+  }, [image]);
+
+  let blur = useSharedValue(0);
+
+  if (!isMaskedImageReady) {
+    return <Loader />;
+  }
+
+  return (
+    <View style={styles.canvas}>
+      <Canvas style={flex1}>
+        <Group transform={[{translateX: 95}, {translateY: 140}]}>
+          {isMaskedImageReady &&
+            mks.value.map((image: SkImage | null, index: number) => (
+              <MaskedImage
+                key={index}
+                isStarted={isStarted}
+                myImg={image}
+                index={index}
+              />
+            ))}
+          <Blur blur={blur} />
+        </Group>
+      </Canvas>
+    </View>
+  );
+};
+
+const Loader = () => {
+  return (
+    <View style={[styles.canvas, allCenter]}>
+      <ActivityIndicator size={24} color="white" />
+      <Text style={[textRegAtk, styles.loadingText]}>Loading...</Text>
+    </View>
+  );
+};
+
+function MaskedImage({
+  myImg,
+  isStarted,
+  index,
+}: {
+  index: number;
+  myImg: SkImage | null;
+  isStarted: boolean;
+}) {
+  let [isFaded, setIsFaded] = useState(false);
+  let opacity = useSharedValue(1);
+  let translation = useSharedValue(0);
+
+  const angleDeviation =
+    ((Math.PI / 36 - Math.PI / 6) / 36) * index + Math.PI / 6;
+  const angle = useSharedValue(0);
+  const finalAngle = Math.random() * angleDeviation - angleDeviation / 2;
+
+  useEffect(() => {
+    if (!isStarted) {
+      return;
+    }
+    const delay = index * 30;
+    const config = {
+      duration: BASE_DURATION + index * VAR_DURATION,
+      easing: Easing.linear,
+    };
+    setTimeout(() => {
+      opacity.value = withTiming(0, config, () => runOnJS(setIsFaded)(true));
+      translation.value = withTiming(MAX_TRANSLATION, config);
+      angle.value = withTiming(finalAngle, config);
+    }, delay);
+  }, [isStarted]);
+
+  let transform = useDerivedValue(() => {
+    return [
+      {translateX: translation.value},
+      {translateY: -translation.value},
+      {rotate: angle.value},
+    ];
+  });
+
+  if (isFaded || !myImg) {
+    return null;
+  }
+
+  return (
+    <Group origin={{x: IMAGE_WIDTH / 2, y: IMAGE_HEIGHT}} transform={transform}>
+      <Image
+        opacity={opacity}
+        x={0}
+        y={0}
+        width={IMAGE_WIDTH}
+        height={IMAGE_HEIGHT}
+        image={myImg}
+        fit="cover"
+      />
+    </Group>
+  );
+}
+
+function weightedRandomDistrib(peak: number): number {
+  'worklet';
+  let prob = [],
+    seq = [],
+    sum = 0;
+  for (let i = 0; i < TOTAL_CANVASES; i++) {
+    let p = Math.pow(TOTAL_CANVASES - Math.abs(peak - i), 3);
+    sum += p;
+    prob.push(p);
+    seq.push(i);
+  }
+
+  function weightedRandom(
+    values: number[],
+    weights: number[],
+    totalWeight: number,
+  ): number {
+    let random = Math.random() * totalWeight;
+    let weight = 0;
+    for (let i = 0; i < values.length; i++) {
+      weight += weights[i];
+      if (random < weight) {
+        return values[i];
+      }
+    }
+    return 0;
+  }
+
+  return weightedRandom(seq, prob, sum);
+}
+
+
+const styles = StyleSheet.create({
+  canvas: {
+    width: CANVAS_WIDTH,
+    aspectRatio: 3 / 4,
+    backgroundColor: '#111',
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  loadingText: {
+    fontSize: 20,
+    color: 'white',
+    marginTop: 12,
+  },
+});
