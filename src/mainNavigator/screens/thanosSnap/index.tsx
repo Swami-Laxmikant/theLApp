@@ -32,6 +32,6 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   rootView: {
-    backgroundColor: 'black',
+    backgroundColor: 'white',
   },
 });

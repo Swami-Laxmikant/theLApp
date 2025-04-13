@@ -29,10 +29,9 @@ import {
   withTiming,
 } from 'react-native-reanimated';
 import {images} from '../../../assets';
-import {array, useMutableValue} from '../../../utils';
 import {allCenter, flex1, textRegAtk} from '../../../constants';
 
-const TOTAL_CANVASES = 35;
+const TOTAL_CANVASES = 16;
 const MAX_TRANSLATION = 55;
 const BASE_DURATION = 700;
 const VAR_DURATION = 100;
@@ -47,12 +46,11 @@ const IMAGE_PROCESSOR_THREAD = createWorkletRuntime('imageProcessor');
 export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
   const image = useImage(images.landscape);
   const [isMaskedImageReady, setIsMaskedImageReady] = useState(false);
-  const mks = useMutableValue<(SkImage | null)[]>(() =>
-    array(TOTAL_CANVASES, () => null),
-  );
+
+  const [skImages, setSkImages] = useState<(SkImage | null)[]>([]);
 
   const upateImages = (images: (SkImage | null)[]) => {
-    mks.value = images;
+    setSkImages(images);
     setIsMaskedImageReady(true);
   };
 
@@ -68,7 +66,6 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
       if (!pixels?.length) {
         return [];
       }
-
       const masks = Array(TOTAL_CANVASES)
         .fill(0)
         .map(() => new Uint8Array(pixels.length));
@@ -83,15 +80,11 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
         let x = i % width;
         let y = Math.floor(i / width);
         const index = (y * width + x) * 4;
-        const r = pixels[index];
-        const g = pixels[index + 1];
-        const b = pixels[index + 2];
-        const a = pixels[index + 3];
 
-        masks[canvaIndex][index] = r;
-        masks[canvaIndex][index + 1] = g;
-        masks[canvaIndex][index + 2] = b;
-        masks[canvaIndex][index + 3] = a;
+        masks[canvaIndex][index] = pixels[index];
+        masks[canvaIndex][index + 1] = pixels[index + 1];
+        masks[canvaIndex][index + 2] = pixels[index + 2];
+        masks[canvaIndex][index + 3] = pixels[index + 3];
       }
 
       const images = masks.map(m =>
@@ -112,6 +105,12 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
   }, [image]);
 
   let blur = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    if (isStarted) {
+      opacity.value = withTiming(0);
+    }
+  }, [isStarted]);
 
   if (!isMaskedImageReady) {
     return <Loader />;
@@ -121,15 +120,21 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
     <View style={styles.canvas}>
       <Canvas style={flex1}>
         <Group transform={[{translateX: 95}, {translateY: 140}]}>
-          {isMaskedImageReady &&
-            mks.value.map((image: SkImage | null, index: number) => (
-              <MaskedImage
-                key={index}
-                isStarted={isStarted}
-                myImg={image}
-                index={index}
-              />
-            ))}
+          <Image
+            opacity={opacity}
+            image={image}
+            width={IMAGE_WIDTH}
+            height={IMAGE_HEIGHT}
+            fit="cover"
+          />
+          {skImages.map((image: SkImage | null, index: number) => (
+            <MaskedImage
+              key={index}
+              isStarted={isStarted}
+              myImg={image}
+              index={index}
+            />
+          ))}
           <Blur blur={blur} />
         </Group>
       </Canvas>
@@ -162,7 +167,7 @@ function MaskedImage({
   const angleDeviation =
     ((Math.PI / 36 - Math.PI / 6) / 36) * index + Math.PI / 6;
   const angle = useSharedValue(0);
-  const finalAngle = Math.random() * angleDeviation - angleDeviation / 2;
+  const finalAngle = Math.random() * angleDeviation / 2;
 
   useEffect(() => {
     if (!isStarted) {
@@ -193,8 +198,8 @@ function MaskedImage({
   }
 
   return (
-    <Group origin={{x: IMAGE_WIDTH / 2, y: IMAGE_HEIGHT}} transform={transform}>
-      <Image
+    <Image
+        origin={{x: IMAGE_WIDTH / 2, y: IMAGE_HEIGHT}} transform={transform}
         opacity={opacity}
         x={0}
         y={0}
@@ -203,7 +208,6 @@ function MaskedImage({
         image={myImg}
         fit="cover"
       />
-    </Group>
   );
 }
 
@@ -237,7 +241,6 @@ function weightedRandomDistrib(peak: number): number {
 
   return weightedRandom(seq, prob, sum);
 }
-
 
 const styles = StyleSheet.create({
   canvas: {
