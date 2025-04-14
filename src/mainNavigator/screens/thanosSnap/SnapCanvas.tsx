@@ -61,9 +61,8 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
     }
     runOnRuntime(
       IMAGE_PROCESSOR_THREAD,
-      (_image: SkImage, upateImages: any) => {
+      (_image: SkImage, upateImages: (images: (SkImage | null)[]) => void) => {
         'worklet';
-        let t = performance.now();
         const offscreenSurface = Skia.Surface.MakeOffscreen(IMAGE_WIDTH, IMAGE_HEIGHT);
         if (!offscreenSurface) return;
         const offscreenCanvas = offscreenSurface.getCanvas();
@@ -89,7 +88,7 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
 
         for (let i = 0; i < totalPoints; i++) {
           const j = Math.floor((i / totalPoints) * TOTAL_CANVASES);
-          const canvaIndex = weightedRandomDistrib(j);
+          const canvaIndex = weightedRandomDistribution(j);
           const x = i % IMAGE_WIDTH;
           const y = Math.floor(i / IMAGE_WIDTH);
           const index = (y * IMAGE_WIDTH + x) * 4;
@@ -112,7 +111,6 @@ export const SnapCanvas = ({isStarted}: {isStarted: boolean}) => {
             IMAGE_WIDTH * 4,
           ),
         );
-        console.log(`Time taken: ${performance.now() - t} milliseconds`);
         runOnJS(upateImages)(images);
       },
     )(image, upateImages);
@@ -221,7 +219,7 @@ function MaskedImage({
   );
 }
 
-function weightedRandomDistrib(peak: number): number {
+function weightedRandomDistribution(peak: number): number {
   'worklet';
   let prob = [],
     seq = [],
